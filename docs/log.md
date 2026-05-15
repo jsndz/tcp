@@ -28,7 +28,6 @@ So each packet is structured in some format both sender and reciever can agree o
 ```go
 type Packet struct {
 	Version    uint8 // type of version
-	Type       PacketType // type of packer can be sync ack etc
 	SEQ        uint // seq of packet for getting correct order
 	ACK        uint // ack bit
 	Flags      uint8 // flags are used to combine packet types like sync + ack
@@ -38,3 +37,16 @@ type Packet struct {
 	Payload    []byte
 }
 ```
+
+# 4: Serialization and deserialization of Packet
+
+The packet is sent as byte in the network 
+need proper way to serialize and deserialize struct
+Using BigEndian for byte order
+always give the specific byte size if you are s/d data like uint8,16 
+checksum also needs to calculated
+used for error detection 
+when marshalling keep the checksum as 0 
+after marshall and you send the data 
+and you unmarshall you can validate the data 
+and if no error is there the checksum of the whole packet will be 0
