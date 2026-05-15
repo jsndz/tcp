@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, 6)
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, 200)
 	if err != nil {
 		panic(err)
 	}
@@ -21,6 +21,6 @@ func main() {
 			panic(err)
 		}
 		fmt.Printf("%v", from)
-		fmt.Printf("%x", buf[:n])
+		fmt.Print(string(buf[:n]))
 	}
 }
