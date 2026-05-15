@@ -19,3 +19,22 @@ using syscall pkg
 Since we need to test if we can send to protocol create a new process which send to the socket
 with same protocol. 
 Since there are i have no friend who will take the data give ip addr as 127.0.0.1 which configs to our own system
+
+# 3: Packet structure
+
+Every protocol defines rules.
+So each packet is structured in some format both sender and reciever can agree on common format
+
+```go
+type Packet struct {
+	Version    uint8 // type of version
+	Type       PacketType // type of packer can be sync ack etc
+	SEQ        uint // seq of packet for getting correct order
+	ACK        uint // ack bit
+	Flags      uint8 // flags are used to combine packet types like sync + ack
+	Window     uint16 // window indicates what size of data can the reciever accept
+	PayloadLen uint16 
+	Checksum   uint16 // checking error
+	Payload    []byte
+}
+```
