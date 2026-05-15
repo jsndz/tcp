@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/jsndz/tcp/pkg/util"
+	"github.com/jsndz/tcp/internal/util"
 )
 
 type PacketType uint
