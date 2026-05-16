@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"errors"
 	"net"
 	"syscall"
 
@@ -18,36 +19,49 @@ type Connection struct {
 
 func NewConnection(socketFD int, peerAddr string) *Connection {
 	ip := net.ParseIP(peerAddr).To4()
+	var addr [4]byte
+	copy(addr[:], ip)
 	return &Connection{
 		SocketFD: socketFD,
 		SendSeq:  0,
 		RecvSeq:  0,
-		PeerAddr: &syscall.SockaddrInet4{Addr: [4]byte(ip)},
+		PeerAddr: &syscall.SockaddrInet4{
+			Addr: addr,
+		},
 	}
 }
 
 func (c *Connection) Send(flags uint8, payload []byte) error {
-	packet := packet.NewPacket(c.SendSeq, 0, flags, 0, payload)
+	packet := packet.NewPacket(c.SendSeq, c.RecvSeq, flags, 0, payload)
 	data := packet.Marshall()
 	err := syscall.Sendto(c.SocketFD, data, 0, c.PeerAddr)
 	c.SendSeq += uint32(len(payload))
 	return err
 }
 
-func (c *Connection) Recv() error {
+func (c *Connection) Recv() (*packet.Packet, error) {
 	buf := make([]byte, 65535)
 	n, from, err := syscall.Recvfrom(c.SocketFD, buf, 0)
 	if err != nil {
-		return err
-	}
-	if from.(*syscall.SockaddrInet4).Addr != c.PeerAddr.Addr {
-		return nil
+		return nil, err
 	}
 
-	packet, err := packet.Unmarshall(buf[:n])
+	if from.(*syscall.SockaddrInet4).Addr != c.PeerAddr.Addr {
+		return nil, errors.New("unexpected packet source")
+	}
+	ipHeaderLen := (buf[0] & 0x0F) * 4
+
+	packet, err := packet.Unmarshall(buf[ipHeaderLen:n])
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if packet.SEQ < c.RecvSeq {
+		return nil, errors.New("duplicate packet")
+	}
+
+	if packet.SEQ > c.RecvSeq {
+		return nil, errors.New("out of order packet")
 	}
 	c.RecvSeq += uint32(len(packet.Payload))
-	return nil
+	return packet, nil
 }
