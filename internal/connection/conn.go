@@ -39,7 +39,7 @@ func (c *Connection) Send(flags uint8, payload []byte) error {
 	return err
 }
 
-func (c *Connection) Recv() (*packet.Packet, error) {
+func (c *Connection) Recv(data []byte) (*packet.Packet, error) {
 	buf := make([]byte, 65535)
 	n, from, err := syscall.Recvfrom(c.SocketFD, buf, 0)
 	if err != nil {
@@ -51,17 +51,25 @@ func (c *Connection) Recv() (*packet.Packet, error) {
 	}
 	ipHeaderLen := (buf[0] & 0x0F) * 4
 
-	packet, err := packet.Unmarshall(buf[ipHeaderLen:n])
+	pkt, err := packet.Unmarshall(buf[ipHeaderLen:n])
 	if err != nil {
 		return nil, err
 	}
-	if packet.SEQ < c.RecvSeq {
+	if pkt.SEQ < c.RecvSeq {
 		return nil, errors.New("duplicate packet")
 	}
 
-	if packet.SEQ > c.RecvSeq {
+	if pkt.SEQ > c.RecvSeq {
 		return nil, errors.New("out of order packet")
 	}
-	c.RecvSeq += uint32(len(packet.Payload))
-	return packet, nil
+	c.RecvSeq += uint32(len(pkt.Payload))
+	if pkt.Flags&packet.FLAG_ACK != 0 {
+		return pkt, nil
+	}
+	flag := packet.FLAG_ACK
+	if len(data) > 0 {
+		flag |= packet.FLAG_DATA
+	}
+	c.Send(flag, data)
+	return pkt, nil
 }
