@@ -62,7 +62,9 @@ ack are sent for every packet
 if there is data to be sent by application layer
 then combine that and send ack with data 
 that is reciever response
-
+DATA consumes sequence space by payload length
+SYN consumes 1 sequence number
+FIN consumes 1 sequence number
 
 
 # 6: Retranmission Logic
@@ -79,3 +81,21 @@ then you if you have any seq in the sendbuffer below 1000 those have been ack
 the ack will be like like 1005
 so all the seq below 1005 => seq+ len(sent.payload)
 and you can delete them now
+
+
+# 7: Out of order packet handling
+
+if the packets are out of order just store them in the recv buffer
+now when you are recv the packet 
+if you next seq is in the recv buffer then use it and then handle it
+here handling means putting in chan
+
+Out of order packet arrives store in the recv buffer
+when the correct packet arrives check for buffer if that packet exist in the buffer process it 
+and repeat till the seq becomes recv eseq
+
+
+# 8:  Add duplicate detection
+
+send ack and return
+because the ack prev sent might have been lost

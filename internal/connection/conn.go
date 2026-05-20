@@ -17,7 +17,8 @@ type SendPacket struct {
 }
 
 type Connection struct {
-	mu       sync.Mutex
+	mu sync.Mutex
+
 	SocketFD int
 
 	SendSeq uint32
@@ -25,88 +26,190 @@ type Connection struct {
 
 	PeerAddr *syscall.SockaddrInet4
 
-	SendBuffer map[uint32]*SendPacket    // used to keep track of sent packets for retransmission
-	RecvBuffer map[uint32]*packet.Packet // used to keep track of received packets for in-order delivery
+	SendBuffer map[uint32]*SendPacket
+	RecvBuffer map[uint32]*packet.Packet
+
+	DeliveryChan chan *packet.Packet
 }
 
 func NewConnection(socketFD int, peerAddr string) *Connection {
 	ip := net.ParseIP(peerAddr).To4()
+
 	var addr [4]byte
 	copy(addr[:], ip)
+
 	return &Connection{
 		SocketFD: socketFD,
-		SendSeq:  0,
-		RecvSeq:  0,
+
+		SendSeq: 0,
+		RecvSeq: 0,
+
 		PeerAddr: &syscall.SockaddrInet4{
 			Addr: addr,
 		},
+
 		SendBuffer: make(map[uint32]*SendPacket),
 		RecvBuffer: make(map[uint32]*packet.Packet),
+
+		DeliveryChan: make(chan *packet.Packet, 1024),
 	}
 }
 
 func (c *Connection) Send(flags uint8, payload []byte) error {
+
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	pkt := packet.NewPacket(c.SendSeq, c.RecvSeq, flags, 0, payload)
+
+	seq := c.SendSeq
+	ack := c.RecvSeq
+
+	advance := uint32(len(payload))
+	if flags&packet.FLAG_SYN != 0 {
+		advance++
+	}
+	if flags&packet.FLAG_FIN != 0 {
+		advance++
+	}
+	c.SendSeq += advance
+	c.mu.Unlock()
+
+	pkt := packet.NewPacket(
+		seq,
+		ack,
+		flags,
+		0,
+		payload,
+	)
+
 	data := pkt.Marshall()
-	err := syscall.Sendto(c.SocketFD, data, 0, c.PeerAddr)
-	c.SendSeq += uint32(len(payload))
+
+	err := syscall.Sendto(
+		c.SocketFD,
+		data,
+		0,
+		c.PeerAddr,
+	)
+
+	if err != nil {
+		return err
+	}
+
 	needsRetransmit :=
 		len(payload) > 0 ||
 			flags&packet.FLAG_SYN != 0 ||
 			flags&packet.FLAG_FIN != 0
+
 	if needsRetransmit {
+
+		c.mu.Lock()
 		c.SendBuffer[pkt.SEQ] = &SendPacket{
 			Packet:   pkt,
 			Retries:  0,
 			SendTime: time.Now(),
 		}
+		c.mu.Unlock()
 	}
-	return err
+
+	return nil
 }
 
-func (c *Connection) Recv() (*packet.Packet, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *Connection) Recv() error {
+
 	buf := make([]byte, 65535)
-	n, from, err := syscall.Recvfrom(c.SocketFD, buf, 0)
+
+	n, from, err := syscall.Recvfrom(
+		c.SocketFD,
+		buf,
+		0,
+	)
+
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	if from.(*syscall.SockaddrInet4).Addr != c.PeerAddr.Addr {
-		return nil, errors.New("unexpected packet source")
+	addr, ok := from.(*syscall.SockaddrInet4)
+
+	if !ok {
+		return errors.New("invalid sockaddr")
 	}
+
+	if addr.Addr != c.PeerAddr.Addr {
+		return errors.New("unexpected packet source")
+	}
+
 	ipHeaderLen := (buf[0] & 0x0F) * 4
 
-	pkt, err := packet.Unmarshall(buf[ipHeaderLen:n])
+	pkt, err := packet.Unmarshall(
+		buf[ipHeaderLen:n],
+	)
+
 	if err != nil {
-		return nil, err
-	}
-	if pkt.SEQ < c.RecvSeq {
-		return nil, errors.New("duplicate packet")
+		return err
 	}
 
-	if pkt.SEQ > c.RecvSeq {
-		return nil, errors.New("out of order packet")
-	}
+	if pkt.Flags&packet.FLAG_ACK != 0 {
 
-	if pkt.Flags&packet.FLAG_ACK == 0 {
-		//not an ACK
-		c.RecvSeq += uint32(len(pkt.Payload))
-		c.SendAck()
-	} else {
-		// ack recieved
+		c.mu.Lock()
 		for seq, sent := range c.SendBuffer {
 			end := seq + uint32(len(sent.Packet.Payload))
+			if sent.Packet.Flags&packet.FLAG_SYN != 0 {
+				end++
+			}
+			if sent.Packet.Flags&packet.FLAG_FIN != 0 {
+				end++
+			}
 			if end <= pkt.ACK {
 				delete(c.SendBuffer, seq)
 			}
 		}
+		c.mu.Unlock()
 	}
 
-	return pkt, nil
+	if len(pkt.Payload) == 0 {
+		return nil
+	}
+
+	c.mu.Lock()
+	expected := c.RecvSeq
+	c.mu.Unlock()
+
+	if pkt.SEQ < expected {
+		c.SendAck()
+		return nil
+	}
+
+	if pkt.SEQ > expected {
+
+		c.mu.Lock()
+		c.RecvBuffer[pkt.SEQ] = pkt
+		c.mu.Unlock()
+
+		return nil
+	}
+
+	c.DeliveryChan <- pkt
+
+	c.mu.Lock()
+	c.RecvSeq += uint32(len(pkt.Payload))
+	c.mu.Unlock()
+
+	for {
+
+		c.mu.Lock()
+		next, ok := c.RecvBuffer[c.RecvSeq]
+		if !ok {
+			c.mu.Unlock()
+			break
+		}
+		delete(c.RecvBuffer, c.RecvSeq)
+		c.RecvSeq += uint32(len(next.Payload))
+		c.mu.Unlock()
+
+		c.DeliveryChan <- next
+	}
+
+	c.SendAck()
+
+	return nil
 }
 
 func (c *Connection) SendAck() error {
