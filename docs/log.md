@@ -50,3 +50,32 @@ when marshalling keep the checksum as 0
 after marshall and you send the data 
 and you unmarshall you can validate the data 
 and if no error is there the checksum of the whole packet will be 0
+
+
+# 5: SEQ and ACK
+
+tracking seq is simple as adding length of the data to seq
+holding the sendSeq and RecvSeq 
+helps to know what data has been transmitted
+seq is len of data recv or sent
+ack are sent for every packet
+if there is data to be sent by application layer
+then combine that and send ack with data 
+that is reciever response
+
+
+
+# 6: Retranmission Logic
+
+So retransmission logic is always running in the background
+so if there are any packet without ack in the conn's sendBuffer
+it retries here we are doing exponential backoff
+if the packet receives ack then it is removed
+for example if the packet 1005 recieves ack
+then packet that have less seq than it will all be ack 
+
+like you recv a seq lets say 1000
+then you if you have any seq in the sendbuffer below 1000 those have been ack 
+the ack will be like like 1005
+so all the seq below 1005 => seq+ len(sent.payload)
+and you can delete them now
