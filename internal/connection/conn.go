@@ -21,8 +21,11 @@ type Connection struct {
 
 	SocketFD int
 
-	SendSeq uint32
-	RecvSeq uint32
+	SendSeq    uint32
+	SendBase   uint32 // oldest unacknowledged SEQ
+	SendWindow uint32 // max number of bytes that can be sent without ACK
+	RecvSeq    uint32
+	RecvWindow uint32 // max number of bytes that can be received without ACK -> your window size
 
 	PeerAddr *syscall.SockaddrInet4
 
@@ -76,7 +79,7 @@ func (c *Connection) Send(flags uint8, payload []byte) error {
 		seq,
 		ack,
 		flags,
-		0,
+		uint16(c.RecvWindow),
 		payload,
 	)
 
@@ -141,11 +144,13 @@ func (c *Connection) Recv() error {
 	pkt, err := packet.Unmarshall(
 		buf[ipHeaderLen:n],
 	)
-
 	if err != nil {
 		return err
 	}
-
+	c.mu.Lock()
+	c.SendWindow = uint32(pkt.Window)
+	c.mu.Unlock()
+	// ack packet
 	if pkt.Flags&packet.FLAG_ACK != 0 {
 
 		c.mu.Lock()
@@ -160,6 +165,9 @@ func (c *Connection) Recv() error {
 			if end <= pkt.ACK {
 				delete(c.SendBuffer, seq)
 			}
+		}
+		if pkt.ACK > c.SendBase {
+			c.SendBase = pkt.ACK
 		}
 		c.mu.Unlock()
 	}

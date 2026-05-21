@@ -99,3 +99,40 @@ and repeat till the seq becomes recv eseq
 
 send ack and return
 because the ack prev sent might have been lost
+
+
+# 9: Sliding window 
+
+The current setup is more of a stop and wait.
+You have to wait around for the data ack to continue.
+Next step would be adding a layer on top where 
+you have multiple packets to send.
+
+Imagine it like this you are continously sending multiple data and you dont wait around the sent data is in the network
+but there is a limit to what can be in the air (called "in flight")that is the window size
+as soon as the window size gets full it stops 
+
+and after getting ack then you can send more
+
+so the window slides
+```go
+type Connection struct {
+	mu sync.Mutex
+
+	SocketFD int
+
+	SendSeq    uint32
+	SendBase   uint32 // oldest unacknowledged SEQ
+	SendWindow uint32 // max number of bytes that can be sent without ACK
+	RecvSeq    uint32
+	RecvWindow uint32 // max number of bytes that can be received without ACK -> your window size
+
+	PeerAddr *syscall.SockaddrInet4
+
+	SendBuffer map[uint32]*SendPacket
+	RecvBuffer map[uint32]*packet.Packet
+
+	DeliveryChan chan *packet.Packet
+}
+```
+The  sliding-window transmission policy is usually one layer above the raw Send() primitive.
