@@ -8,8 +8,7 @@ import (
 const MAX_RETRIES = 10
 
 func (conn *Connection) RetransmissionLoop() {
-	conn.mu.Lock()
-	defer conn.mu.Unlock()
+
 	ticker := time.NewTicker(1 * time.Second)
 
 	for range ticker.C {

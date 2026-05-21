@@ -1,26 +1,60 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"syscall"
+
+	"github.com/jsndz/tcp/internal/connection"
 )
 
 func main() {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Source Port: ")
+
+	srcStr, err := reader.ReadString('\n')
+	if err != nil {
+		panic(err)
+	}
+
+	srcStr = strings.TrimSpace(srcStr)
+
+	srcPort, err := strconv.Atoi(srcStr)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Print("Destination Port: ")
+
+	dstStr, err := reader.ReadString('\n')
+	if err != nil {
+		panic(err)
+	}
+
+	dstStr = strings.TrimSpace(dstStr)
+
+	dstPort, err := strconv.Atoi(dstStr)
+	if err != nil {
+		panic(err)
+	}
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, 200)
 	if err != nil {
 		panic(err)
 	}
 	defer syscall.Close(fd)
 
-	buf := make([]byte, 65535)
-
+	conn := connection.NewConnection(fd, "127.0.0.1", srcPort, dstPort)
+	go conn.Write()
+	go conn.Read()
 	for {
-
-		n, from, err := syscall.Recvfrom(fd, buf, 0)
+		text, err := reader.ReadString('\n')
 		if err != nil {
-			panic(err)
+			break
 		}
-		fmt.Printf("%v", from)
-		fmt.Print(string(buf[:n]))
+		text = strings.TrimSpace(text)
+		conn.SendChan <- []byte(text)
 	}
 }

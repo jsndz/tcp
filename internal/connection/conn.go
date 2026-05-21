@@ -10,6 +10,8 @@ import (
 	"github.com/jsndz/tcp/internal/packet"
 )
 
+const MAXPACKETSIZE = 1024
+
 type SendPacket struct {
 	Packet   *packet.Packet
 	Retries  int
@@ -20,6 +22,8 @@ type Connection struct {
 	mu sync.Mutex
 
 	SocketFD int
+	srcPort  int
+	destPort int
 
 	SendSeq    uint32
 	SendBase   uint32 // oldest unacknowledged SEQ
@@ -32,10 +36,11 @@ type Connection struct {
 	SendBuffer map[uint32]*SendPacket
 	RecvBuffer map[uint32]*packet.Packet
 
-	DeliveryChan chan *packet.Packet
+	DeliveryChan chan []byte
+	SendChan     chan []byte
 }
 
-func NewConnection(socketFD int, peerAddr string) *Connection {
+func NewConnection(socketFD int, peerAddr string, srcPort int, destPort int) *Connection {
 	ip := net.ParseIP(peerAddr).To4()
 
 	var addr [4]byte
@@ -43,10 +48,14 @@ func NewConnection(socketFD int, peerAddr string) *Connection {
 
 	return &Connection{
 		SocketFD: socketFD,
+		srcPort:  srcPort,
+		destPort: destPort,
 
-		SendSeq: 0,
-		RecvSeq: 0,
-
+		SendSeq:    0,
+		SendBase:   0,
+		SendWindow: 0,
+		RecvSeq:    0,
+		RecvWindow: 1024,
 		PeerAddr: &syscall.SockaddrInet4{
 			Addr: addr,
 		},
@@ -54,7 +63,8 @@ func NewConnection(socketFD int, peerAddr string) *Connection {
 		SendBuffer: make(map[uint32]*SendPacket),
 		RecvBuffer: make(map[uint32]*packet.Packet),
 
-		DeliveryChan: make(chan *packet.Packet, 1024),
+		DeliveryChan: make(chan []byte, 1024),
+		SendChan:     make(chan []byte, 1024),
 	}
 }
 
@@ -194,7 +204,7 @@ func (c *Connection) Recv() error {
 		return nil
 	}
 
-	c.DeliveryChan <- pkt
+	c.DeliveryChan <- pkt.Payload
 
 	c.mu.Lock()
 	c.RecvSeq += uint32(len(pkt.Payload))
@@ -212,7 +222,7 @@ func (c *Connection) Recv() error {
 		c.RecvSeq += uint32(len(next.Payload))
 		c.mu.Unlock()
 
-		c.DeliveryChan <- next
+		c.DeliveryChan <- next.Payload
 	}
 
 	c.SendAck()
@@ -222,4 +232,33 @@ func (c *Connection) Recv() error {
 
 func (c *Connection) SendAck() error {
 	return c.Send(packet.FLAG_ACK, nil)
+}
+
+func (c *Connection) SendLoop() {
+	for data := range c.SendChan {
+		offset := 0
+
+		for offset < len(data) {
+			inflightFull := c.SendWindow <= c.SendSeq-c.SendBase
+
+			if inflightFull {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			remaining := len(data) - offset
+			size := min(remaining, MAXPACKETSIZE)
+			dataToBeSent := data[offset : offset+size]
+			c.Send(packet.FLAG_DATA, dataToBeSent)
+			offset += size
+		}
+	}
+}
+
+func (c *Connection) RecvLoop() {
+	for {
+		err := c.Recv()
+		if err != nil {
+			continue
+		}
+	}
 }

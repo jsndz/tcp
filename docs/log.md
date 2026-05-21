@@ -1,3 +1,11 @@
+TCP is a protocol with number as 6.
+So when the device receives data from IP with protocol mentioned 6 it will be sent to tcp stack.
+Like that here we have 200 which is a tcp clone. 
+When i open a socket with 200
+```go
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, 200)
+```
+Whatever ip data comes with protocol number 200 it will sent to this socket which i am listening to.
 We can implement TCP in two ways:
 
 1. Upon UDP: on UDP adding reliability and other features of TCP
@@ -121,10 +129,10 @@ type Connection struct {
 
 	SocketFD int
 
-	SendSeq    uint32
+	SendSeq    uint32 // seq you have sent
 	SendBase   uint32 // oldest unacknowledged SEQ
 	SendWindow uint32 // max number of bytes that can be sent without ACK
-	RecvSeq    uint32
+	RecvSeq    uint32 // seq till which you have recved
 	RecvWindow uint32 // max number of bytes that can be received without ACK -> your window size
 
 	PeerAddr *syscall.SockaddrInet4
