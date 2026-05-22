@@ -40,13 +40,32 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, 200)
 	if err != nil {
 		panic(err)
 	}
 	defer syscall.Close(fd)
 
-	conn := connection.NewConnection(fd, "127.0.0.1", srcPort, dstPort)
+	conn := connection.NewConnection(fd, "127.0.0.1", uint16(srcPort), uint16(dstPort))
+	fmt.Print("Mode (server/client): ")
+
+	mode, _ := reader.ReadString('\n')
+	mode = strings.TrimSpace(mode)
+	if mode == "server" {
+
+		err = conn.Accept()
+		if err != nil {
+			panic(err)
+		}
+
+	} else {
+
+		err = conn.Connect()
+		if err != nil {
+			panic(err)
+		}
+	}
 	go conn.Write()
 	go conn.Read()
 	for {

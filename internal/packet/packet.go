@@ -20,6 +20,8 @@ const (
 
 type Packet struct {
 	Version    uint8
+	SrcPort    uint16
+	DstPort    uint16
 	Flags      uint8
 	SEQ        uint32
 	ACK        uint32
@@ -29,9 +31,11 @@ type Packet struct {
 	Payload    []byte
 }
 
-func NewPacket(seq uint32, ack uint32, flags uint8, window uint16, payload []byte) *Packet {
+func NewPacket(srcPort uint16, dstPort uint16, seq uint32, ack uint32, flags uint8, window uint16, payload []byte) *Packet {
 	pkt := &Packet{
 		Version:    1,
+		SrcPort:    srcPort,
+		DstPort:    dstPort,
 		Flags:      flags,
 		SEQ:        seq,
 		ACK:        ack,
@@ -48,6 +52,8 @@ func (p *Packet) Marshall() []byte {
 	var buf bytes.Buffer
 	buf.WriteByte(p.Version)
 	buf.WriteByte(p.Flags)
+	binary.Write(&buf, binary.BigEndian, p.SrcPort)
+	binary.Write(&buf, binary.BigEndian, p.DstPort)
 	binary.Write(&buf, binary.BigEndian, p.SEQ)
 	binary.Write(&buf, binary.BigEndian, p.ACK)
 	binary.Write(&buf, binary.BigEndian, p.Window)
@@ -69,26 +75,28 @@ func (p *Packet) ValidateChecksum() bool {
 
 func Unmarshall(data []byte) (*Packet, error) {
 	if len(data) < 16 {
-		return nil, errors.New("Invalid packet")
+		return nil, errors.New("Invalid packet less len 16 bytes")
 	}
 	pkt := &Packet{
 		Version: data[0],
 		Flags:   data[1],
 	}
 	buf := bytes.NewReader(data[2:])
+	binary.Read(buf, binary.BigEndian, &pkt.SrcPort)
+	binary.Read(buf, binary.BigEndian, &pkt.DstPort)
 	binary.Read(buf, binary.BigEndian, &pkt.SEQ)
 	binary.Read(buf, binary.BigEndian, &pkt.ACK)
 	binary.Read(buf, binary.BigEndian, &pkt.Window)
 	binary.Read(buf, binary.BigEndian, &pkt.PayloadLen)
 	binary.Read(buf, binary.BigEndian, &pkt.Checksum)
 
-	if int(pkt.PayloadLen) != len(data)-16 {
-		return nil, errors.New("Invalid packet")
+	if int(pkt.PayloadLen) != len(data)-20 {
+		return nil, errors.New("Invalid packet payload length")
 	}
-	pkt.Payload = data[16:]
+	pkt.Payload = data[20:]
 
 	if util.ComputeChecksum(data) != 0 {
-		return nil, errors.New("Invalid packet")
+		return nil, errors.New("Invalid packet checksum")
 	}
 
 	return pkt, nil

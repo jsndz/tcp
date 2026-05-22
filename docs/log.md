@@ -144,3 +144,22 @@ type Connection struct {
 }
 ```
 The  sliding-window transmission policy is usually one layer above the raw Send() primitive.
+
+
+# Overall setup:
+
+Added a way distinguish applications using ports
+also separate handshake to connect and accept to designate client and server
+here,
+you receive ALL protocol-200 packets
+including your own outgoing packets
+because there is not filtering from kernel
+
+no transport-layer filtering
+no connection tracking
+no port demultiplexing
+no stream abstraction
+So this behavior is specific to:
+raw sockets / custom transport protocol implementation
+
+and for loop here are blocking and don't consume CPU 

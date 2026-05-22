@@ -1,7 +1,6 @@
 package connection
 
 import (
-	"errors"
 	"net"
 	"sync"
 	"syscall"
@@ -22,8 +21,8 @@ type Connection struct {
 	mu sync.Mutex
 
 	SocketFD int
-	srcPort  int
-	destPort int
+	srcPort  uint16
+	destPort uint16
 
 	SendSeq    uint32
 	SendBase   uint32 // oldest unacknowledged SEQ
@@ -40,7 +39,7 @@ type Connection struct {
 	SendChan     chan []byte
 }
 
-func NewConnection(socketFD int, peerAddr string, srcPort int, destPort int) *Connection {
+func NewConnection(socketFD int, peerAddr string, srcPort uint16, destPort uint16) *Connection {
 	ip := net.ParseIP(peerAddr).To4()
 
 	var addr [4]byte
@@ -86,6 +85,8 @@ func (c *Connection) Send(flags uint8, payload []byte) error {
 	c.mu.Unlock()
 
 	pkt := packet.NewPacket(
+		(c.srcPort),
+		(c.destPort),
 		seq,
 		ack,
 		flags,
@@ -127,39 +128,15 @@ func (c *Connection) Send(flags uint8, payload []byte) error {
 
 func (c *Connection) Recv() error {
 
-	buf := make([]byte, 65535)
-
-	n, from, err := syscall.Recvfrom(
-		c.SocketFD,
-		buf,
-		0,
-	)
-
+	pkt, err := c.ReadPacket()
 	if err != nil {
 		return err
 	}
 
-	addr, ok := from.(*syscall.SockaddrInet4)
-
-	if !ok {
-		return errors.New("invalid sockaddr")
-	}
-
-	if addr.Addr != c.PeerAddr.Addr {
-		return errors.New("unexpected packet source")
-	}
-
-	ipHeaderLen := (buf[0] & 0x0F) * 4
-
-	pkt, err := packet.Unmarshall(
-		buf[ipHeaderLen:n],
-	)
-	if err != nil {
-		return err
-	}
 	c.mu.Lock()
 	c.SendWindow = uint32(pkt.Window)
 	c.mu.Unlock()
+
 	// ack packet
 	if pkt.Flags&packet.FLAG_ACK != 0 {
 
@@ -260,5 +237,52 @@ func (c *Connection) RecvLoop() {
 		if err != nil {
 			continue
 		}
+	}
+}
+
+func (c *Connection) ReadPacket() (*packet.Packet, error) {
+
+	for {
+
+		buf := make([]byte, 65535)
+
+		n, from, err := syscall.Recvfrom(
+			c.SocketFD,
+			buf,
+			0,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		addr, ok := from.(*syscall.SockaddrInet4)
+		if !ok {
+			continue
+		}
+
+		if addr.Addr != c.PeerAddr.Addr {
+			continue
+		}
+
+		ipHeaderLen := (buf[0] & 0x0F) * 4
+
+		pkt, err := packet.Unmarshall(
+			buf[ipHeaderLen:n],
+		)
+
+		if err != nil {
+			continue
+		}
+
+		if pkt.DstPort != c.srcPort {
+			continue
+		}
+
+		if pkt.SrcPort != c.destPort {
+			continue
+		}
+
+		return pkt, nil
 	}
 }
